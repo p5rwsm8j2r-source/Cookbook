@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cookbook">
+<title>Cookbook</title>
+<style>
+:root{--bg:#fff;--card:#f4f4f6;--tx:#111;--mut:#777;--ac:#e8590c;--ok:#2b8a3e;--bad:#c92a2a;--bd:#ddd}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--card:#1d1d21;--tx:#f2f2f2;--mut:#999;--bd:#333}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px -apple-system,system-ui,sans-serif;padding-bottom:84px}
+header{padding:14px 16px 4px;font-size:22px;font-weight:700}
+main{padding:8px 16px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;color:var(--mut);padding:12px 0;font-size:13px}
+nav button.on{color:var(--ac);font-weight:700}
+input,select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font-size:16px}
+.btn{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:11px 14px;font-size:15px;font-weight:600}
+.btn.s{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+.row{display:flex;gap:8px;margin:8px 0;align-items:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chip{background:var(--card);border:1px solid var(--bd);border-radius:999px;padding:7px 12px;font-size:14px;color:var(--tx)}
+.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.rc{background:var(--card);border-radius:12px;overflow:hidden}
+.rc img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block}
+.rc div{padding:8px;font-size:14px}
+.badge{display:inline-block;font-size:12px;border-radius:6px;padding:2px 6px;margin-top:4px;background:var(--ok);color:#fff}
+.badge.w{background:#f08c00}
+h3{margin:18px 0 6px}
+.muted{color:var(--mut);font-size:14px}
+.modal{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:16px 16px 100px;z-index:9}
+.modal img{width:100%;border-radius:12px}
+.have{color:var(--ok)}.miss{color:var(--bad)}
+li{margin:4px 0}
+.day{background:var(--card);border-radius:12px;padding:10px;margin:8px 0}
+.item{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--bd)}
+.item input{width:22px;height:22px}
+.item.done span{text-decoration:line-through;color:var(--mut)}
+.x{margin-left:auto;background:none;border:0;color:var(--mut);font-size:18px}
+</style></head><body>
+<header id="title">Cookbook</header>
+<main id="app"></main>
+<nav id="nav"></nav>
+<script>
+const API='https://www.themealdb.com/api/json/v1/1/';
+const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const COMMON=['chicken','beef','salmon','pork','eggs','rice','pasta','potatoes','onion','garlic','tomatoes','cheese','butter','milk','olive oil','carrots','peppers','mushrooms','soy sauce','cream','broccoli','lemon'];
+const CATS=['Chicken','Beef','Pasta','Seafood','Pork','Lamb','Vegetarian','Side'];
+const S=JSON.parse(localStorage.getItem('cookbook')||'null')||{pantry:[],plan:{},shop:[],tab:'find'};
+let cache={}, results=[], busy=false, msg='', cat='';
+const save=()=>localStorage.setItem('cookbook',JSON.stringify(S));
+const $=s=>document.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=t=>t.toLowerCase().trim();
+async function j(u){const r=await fetch(API+u);return r.json()}
+async function detail(id){
+  if(cache[id])return cache[id];
+  const d=(await j('lookup.php?i='+id)).meals[0];
+  const ing=[];
+  for(let i=1;i<=20;i++){const n=(d['strIngredient'+i]||'').trim();if(n)ing.push({name:norm(n),measure:(d['strMeasure'+i]||'').trim()})}
+  return cache[id]={id:d.idMeal,name:d.strMeal,img:d.strMealThumb,cat:d.strCategory,area:d.strArea,steps:d.strInstructions,ing};
+}
+const inPantry=n=>S.pantry.some(p=>n.includes(p)||p.includes(n));
+function score(r){const h=r.ing.filter(i=>inPantry(i.name)).length;return{have:h,total:r.ing.length}}
+
+async function findByPantry(){
+  if(!S.pantry.length){msg='Add some ingredients to your pantry first.';render();return}
+  busy=true;msg='Searching recipes…';render();
+  try{
+    const counts={};
+    for(const p of S.pantry.slice(0,8)){
+      const q=p.replace(/\s+/g,'_');
+      const d=await j('filter.php?i='+encodeURIComponent(q));
+      (d.meals||[]).forEach(m=>counts[m.idMeal]=(counts[m.idMeal]||0)+1);
+    }
+    const ids=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,14).map(e=>e[0]);
+    const rs=await Promise.all(ids.map(detail));
+    results=rs.sort((a,b)=>{const x=score(a),y=score(b);return (y.have/y.total)-(x.have/x.total)||y.have-x.have});
+    msg=results.length?'':'No matches. Try different ingredients.';
+  }catch(e){msg='Could not reach the recipe service. Check your connection.'}
+  busy=false;render();
+}
+async function browse(c){
+  cat=c;busy=true;msg='Loading…';render();
+  try{
+    const d=await j('filter.php?c='+encodeURIComponent(c));
+    const ids=(d.meals||[]).slice(0,16).map(m=>m.idMeal);
+    results=await Promise.all(ids.map(detail));msg='';
+  }catch(e){msg='Could not reach the recipe service.'}
+  busy=false;render();
+}
+async function search(){
+  const q=$('#q').value.trim();if(!q)return;
+  busy=true;msg='Searching…';render();
+  try{
+    const d=await j('search.php?s='+encodeURIComponent(q));
+    results=[];
+    for(const m of (d.meals||[]).slice(0,16)){const r=await detail(m.idMeal);results.push(r)}
+    msg=results.length?'':'Nothing found.';
+  }catch(e){msg='Could not reach the recipe service.'}
+  busy=false;render();
+}
+function addPantry(v){v=norm(v);if(v&&!S.pantry.includes(v)){S.pantry.push(v);save()}}
+function togglePantry(v){const i=S.pantry.indexOf(v);i>=0?S.pantry.splice(i,1):S.pantry.push(v);save();render()}
+function card(r){const s=score(r);return `<div class="rc" onclick="openR('${r.id}')"><img loading="lazy" src="${r.img}/preview"><div>${esc(r.name)}<br>${S.pantry.length?`<span class="badge ${s.have/s.total<.5?'w':''}">${s.have}/${s.total} in pantry</span>`:`<span class="muted">${esc(r.cat||'')}</span>`}</div></div>`}
+function openR(id){
+  const r=cache[id];
+  const planned=Object.entries(S.plan).filter(([d,v])=>v.includes(id)).map(e=>e[0]);
+  const m=document.createElement('div');m.className='modal';m.id='modal';
+  m.innerHTML=`<button class="btn s" onclick="closeR()">← Back</button><h2>${esc(r.name)}</h2><img src="${r.img}"><p class="muted">${esc(r.cat||'')} · ${esc(r.area||'')}</p>
+  <h3>Add to week</h3><div class="chips">${DAYS.map(d=>`<span class="chip ${planned.includes(d)?'on':''}" onclick="planDay('${d}','${id}')">${d}</span>`).join('')}</div>
+  <h3>Ingredients</h3><ul>${r.ing.map(i=>`<li class="${inPantry(i.name)?'have':'miss'}">${esc(i.measure)} ${esc(i.name)} ${inPantry(i.name)?'✓':''}</li>`).join('')}</ul>
+  <div class="row"><button class="btn" onclick="addMissing('${id}')">Add missing to list</button></div>
+  <h3>Method</h3><div style="white-space:pre-line;line-height:1.5">${esc(r.steps||'')}</div>`;
+  document.body.appendChild(m);
+}
+function closeR(){const m=$('#modal');if(m)m.remove();render()}
+function planDay(d,id){const a=S.plan[d]=S.plan[d]||[];const i=a.indexOf(id);i>=0?a.splice(i,1):a.push(id);save();closeR();openR(id)}
+function addShop(name,measure,from){
+  const ex=S.shop.find(x=>x.name===name);
+  if(ex){if(measure&&!ex.measure.includes(measure))ex.measure+=(ex.measure?' + ':'')+measure}
+  else S.shop.push({name,measure,done:false,from});
+}
+function addMissing(id){const r=cache[id];let n=0;r.ing.filter(i=>!inPantry(i.name)).forEach(i=>{addShop(i.name,i.measure,r.name);n++});save();alert(n+' items added to shopping list')}
+function buildWeek(skipPantry){
+  const ids=[...new Set(Object.values(S.plan).flat())];
+  S.shop=S.shop.filter(x=>x.manual);
+  ids.forEach(id=>{const r=cache[id];if(!r)return;r.ing.forEach(i=>{if(skipPantry&&inPantry(i.name))return;addShop(i.name,i.measure,r.name)})});
+  save();S.tab='shop';render();
+}
+async function loadPlanned(){
+  const ids=[...new Set(Object.values(S.plan).flat())];
+  await Promise.all(ids.map(detail));
+}
+function clearWeek(){if(confirm('Clear the whole week plan?')){S.plan={};save();render()}}
+function removeFrom(d,id){S.plan[d]=S.plan[d].filter(x=>x!==id);save();render()}
+function addManual(){const v=$('#manual').value.trim();if(v){S.shop.push({name:norm(v),measure:'',done:false,manual:true});save();render()}}
+function tick(i){S.shop[i].done=!S.shop[i].done;save();render()}
+function del(i){S.shop.splice(i,1);save();render()}
+function copyList(){
+  const t=S.shop.filter(x=>!x.done).map(x=>`- ${x.measure?x.measure+' ':''}${x.name}`).join('\n');
+  if(navigator.share)navigator.share({text:t}).catch(()=>{});
+  else if(navigator.clipboard)navigator.clipboard.writeText(t).then(()=>alert('Copied'));
+}
+function setTab(t){S.tab=t;save();render()}
+
+function render(){
+  const tabs=[['find','Find'],['pantry','Pantry'],['week','Week'],['shop','List ('+S.shop.filter(x=>!x.done).length+')']];
+  $('#nav').innerHTML=tabs.map(([k,l])=>`<button class="${S.tab===k?'on':''}" onclick="setTab('${k}')">${l}</button>`).join('');
+  $('#title').textContent={find:'Find recipes',pantry:'My pantry',week:'This week',shop:'Shopping list'}[S.tab];
+  let h='';
+  if(S.tab==='pantry'){
+    h=`<div class="row"><input id="pin" placeholder="Add ingredient (e.g. chicken)" onkeydown="if(event.key==='Enter'){addPantry(this.value);render()}"><button class="btn" onclick="addPantry($('#pin').value);render()">Add</button></div>
+    <h3>In my cupboard</h3><div class="chips">${S.pantry.map(p=>`<span class="chip on" onclick="togglePantry('${esc(p)}')">${esc(p)} ✕</span>`).join('')||'<span class="muted">Nothing yet. Tap below.</span>'}</div>
+    <h3>Quick add</h3><div class="chips">${COMMON.filter(c=>!S.pantry.includes(c)).map(c=>`<span class="chip" onclick="togglePantry('${c}')">${c}</span>`).join('')}</div>
+    <button class="btn" onclick="setTab('find');findByPantry()">Find recipes with these</button>`;
+  }else if(S.tab==='find'){
+    h=`<div class="row"><input id="q" placeholder="Search recipes (e.g. steak, carbonara)" onkeydown="if(event.key==='Enter')search()"><button class="btn" onclick="search()">Go</button></div>
+    <div class="row"><button class="btn" onclick="findByPantry()">Match my pantry (${S.pantry.length})</button></div>
+    <div class="chips">${CATS.map(c=>`<span class="chip ${cat===c?'on':''}" onclick="browse('${c}')">${c}</span>`).join('')}</div>
+    <p class="muted">${esc(msg)}</p><div class="grid">${results.map(card).join('')}</div>`;
+  }else if(S.tab==='week'){
+    h=DAYS.map(d=>`<div class="day"><b>${d}</b>${(S.plan[d]||[]).map(id=>cache[id]?`<div class="row"><span onclick="openR('${id}')" style="flex:1">${esc(cache[id].name)}</span><button class="x" onclick="removeFrom('${d}','${id}')">✕</button></div>`:'').join('')||'<div class="muted">Nothing planned</div>'}</div>`).join('')+
+    `<div class="row"><button class="btn" onclick="buildWeek(true)">Make list (skip pantry items)</button></div><div class="row"><button class="btn s" onclick="buildWeek(false)">Make list (everything)</button><button class="btn s" onclick="clearWeek()">Clear week</button></div><p class="muted">Pick recipes in Find, open one, and tap a day.</p>`;
+  }else{
+    h=`<div class="row"><input id="manual" placeholder="Add item" onkeydown="if(event.key==='Enter')addManual()"><button class="btn" onclick="addManual()">Add</button></div>`+
+    (S.shop.map((x,i)=>`<div class="item ${x.done?'done':''}"><input type="checkbox" ${x.done?'checked':''} onchange="tick(${i})"><span>${esc(x.measure)} ${esc(x.name)}</span><button class="x" onclick="del(${i})">✕</button></div>`).join('')||'<p class="muted">Empty. Plan your week, then tap Make list.</p>')+
+    `<div class="row" style="margin-top:14px"><button class="btn" onclick="copyList()">Share / copy</button><button class="btn s" onclick="S.shop=S.shop.filter(x=>!x.done);save();render()">Remove ticked</button></div>`;
+  }
+  $('#app').innerHTML=h;
+}
+loadPlanned().then(render);render();
+</script></body></html>
